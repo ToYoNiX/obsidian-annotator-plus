@@ -189,10 +189,6 @@ settings:
 .setting-item.no-border,
 .pdf-plus-settings.vertical-tab-content .setting-item.no-border {
     border-top: none;
-
-    &.small-padding {
-        padding-top: 0;
-    }
 }
 
 .setting-item-control input.error {
