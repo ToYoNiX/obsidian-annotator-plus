@@ -6,6 +6,7 @@ import { EncryptedPDFError, PDFArray, PDFDict, PDFDocument, PDFName, PDFNumber, 
 import PDFPlus from 'main';
 import { ColorPalette, ColorPaletteState } from 'color-palette';
 import { copyLinkLib } from './copy-link';
+import { AnnotateLib } from './annotate';
 import { HighlightLib } from './highlights';
 import { WorkspaceLib } from './workspace-lib';
 import { cropCanvas, encodeLinktext, getDirectPDFObj, isVersionNewerThan, parsePDFSubpath, removeExtension, rotateCanvas, toSingleLine, isTargetNode } from 'utils';
@@ -46,6 +47,7 @@ export class PDFPlusLib {
     /** Sub-modules */
     commands: PDFPlusCommands;
     copyLink: copyLinkLib;
+    annotate: AnnotateLib;
     highlight: HighlightLib;
     workspace: WorkspaceLib;
     composer: PDFComposer;
@@ -69,6 +71,7 @@ export class PDFPlusLib {
 
         this.commands = new PDFPlusCommands(plugin);
         this.copyLink = new copyLinkLib(plugin);
+        this.annotate = new AnnotateLib(plugin);
         this.highlight = new HighlightLib(plugin);
         this.workspace = new WorkspaceLib(plugin);
         this.composer = new PDFComposer(plugin);
@@ -1113,7 +1116,7 @@ export class PDFPlusLib {
         detail: string;
     }> {
         const { result: response, error: requestError } = await tryCatchAsync(requestUrl({
-            url: 'https://api.github.com/repos/ryotaushio/obsidian-pdf-plus/releases?per_page=10&page=1',
+            url: 'https://api.github.com/repos/ToYoNiX/obsidian-annotator-plus/releases?per_page=10&page=1',
             headers: {
                 accept: 'application/vnd.github+json',
                 'X-GitHub-Api-Version': '2022-11-28',

@@ -5,6 +5,7 @@ import { PDFPlusTemplateProcessor } from 'template';
 import { encodeLinktext, getOffsetInTextLayerNode, getTextLayerInfo, getTextLayerNode, paramsToSubpath, parsePDFSubpath, subpathToParams } from 'utils';
 import { Canvas, PDFOutlineTreeNode, PDFViewerChild, Rect } from 'typings';
 import { ColorPalette } from 'color-palette';
+import { AnnotationSource } from './annotate';
 
 
 export type AutoFocusTarget =
@@ -14,6 +15,14 @@ export type AutoFocusTarget =
     | 'last-paste-then-last-active'
     | 'last-paste-then-last-active-and-open'
     | 'last-active-and-open-then-last-paste';
+
+/**
+ * Passed to the copy methods to add the result to the linked notes (see `AnnotateLib`) instead of copying it.
+ * If omitted, the result is added only when auto-annotate is on. Pass `false` to always copy.
+ */
+export interface AnnotateRequest {
+    explicitFormat?: boolean;
+}
 
 export class copyLinkLib extends PDFPlusLibSubmodule {
     statusDurationMs = 2000;
@@ -256,7 +265,7 @@ export class copyLinkLib extends PDFPlusLibSubmodule {
         return { child, copyButtonEl, template, page, id };
     }
 
-    copyLinkToSelection(checking: boolean, templates: { copyFormat: string, displayTextFormat?: string }, colorName?: string, autoPaste?: boolean): boolean {
+    copyLinkToSelection(checking: boolean, templates: { copyFormat: string, displayTextFormat?: string }, colorName?: string, autoPaste?: boolean, annotate?: AnnotateRequest | false): boolean {
         const variables = this.getTemplateVariables(colorName ? { color: colorName.toLowerCase() } : {});
 
         if (variables) {
@@ -272,16 +281,25 @@ export class copyLinkLib extends PDFPlusLibSubmodule {
 
             if (!checking) {
                 (async () => {
-                    const evaluated = this.getTextToCopy(child, templates.copyFormat, templates.displayTextFormat, file, page, subpath, text, colorName?.toLowerCase() ?? '');
-                    // Without await, the focus can move to a different document before `writeText` is completed
-                    // if auto-focus is on and the PDF is opened in a secondary window, which causes the copy to fail.
-                    // https://github.com/RyotaUshio/obsidian-pdf-plus/issues/93
-                    await navigator.clipboard.writeText(evaluated);
-                    this.onCopyFinish(evaluated);
+                    const annotated = await this.annotateIfRequested(annotate, {
+                        child, file, page, subpath, text,
+                        colorName: colorName?.toLowerCase() ?? '',
+                        copyFormat: templates.copyFormat,
+                        displayTextFormat: templates.displayTextFormat,
+                    });
 
-                    const palette = this.lib.getColorPaletteFromChild(child);
-                    palette?.setStatus('Link copied', this.statusDurationMs);
-                    this.autoFocusOrAutoPaste(evaluated, autoPaste, palette ?? undefined);
+                    if (!annotated) {
+                        const evaluated = this.getTextToCopy(child, templates.copyFormat, templates.displayTextFormat, file, page, subpath, text, colorName?.toLowerCase() ?? '');
+                        // Without await, the focus can move to a different document before `writeText` is completed
+                        // if auto-focus is on and the PDF is opened in a secondary window, which causes the copy to fail.
+                        // https://github.com/RyotaUshio/obsidian-pdf-plus/issues/93
+                        await navigator.clipboard.writeText(evaluated);
+                        this.onCopyFinish(evaluated);
+
+                        const palette = this.lib.getColorPaletteFromChild(child);
+                        palette?.setStatus('Link copied', this.statusDurationMs);
+                        this.autoFocusOrAutoPaste(evaluated, autoPaste, palette ?? undefined);
+                    }
 
                     // TODO: Needs refactor
                     const result = parsePDFSubpath(subpath);
@@ -311,7 +329,7 @@ export class copyLinkLib extends PDFPlusLibSubmodule {
         return false;
     }
 
-    copyLinkToAnnotation(child: PDFViewerChild, checking: boolean, templates: { copyFormat: string, displayTextFormat?: string }, page: number, id: string, autoPaste?: boolean, shouldShowStatus?: boolean): boolean {
+    copyLinkToAnnotation(child: PDFViewerChild, checking: boolean, templates: { copyFormat: string, displayTextFormat?: string }, page: number, id: string, autoPaste?: boolean, shouldShowStatus?: boolean, annotate?: AnnotateRequest | false): boolean {
         const file = child.file;
         if (!file) return false;
 
@@ -326,14 +344,24 @@ export class copyLinkLib extends PDFPlusLibSubmodule {
                         const rect = annotData.rect;
                         subpath += `&rect=${rect[0]},${rect[1]},${rect[2]},${rect[3]}`;
                     }
-                    const evaluated = this.getTextToCopy(child, templates.copyFormat, templates.displayTextFormat, file, page, subpath, text ?? '', color);
-                    await navigator.clipboard.writeText(evaluated);
-                    this.onCopyFinish(evaluated);
+                    const annotated = await this.annotateIfRequested(annotate, {
+                        child, file, page, subpath,
+                        text: text ?? '',
+                        colorName: color,
+                        copyFormat: templates.copyFormat,
+                        displayTextFormat: templates.displayTextFormat,
+                    });
 
-                    const palette = this.lib.getColorPaletteFromChild(child);
-                    // This can be redundant because the copy button already shows the status.
-                    if (shouldShowStatus) palette?.setStatus('Link copied', this.statusDurationMs);
-                    this.autoFocusOrAutoPaste(evaluated, autoPaste, palette ?? undefined);
+                    if (!annotated) {
+                        const evaluated = this.getTextToCopy(child, templates.copyFormat, templates.displayTextFormat, file, page, subpath, text ?? '', color);
+                        await navigator.clipboard.writeText(evaluated);
+                        this.onCopyFinish(evaluated);
+
+                        const palette = this.lib.getColorPaletteFromChild(child);
+                        // This can be redundant because the copy button already shows the status.
+                        if (shouldShowStatus) palette?.setStatus('Link copied', this.statusDurationMs);
+                        this.autoFocusOrAutoPaste(evaluated, autoPaste, palette ?? undefined);
+                    }
 
                     // TODO: Needs refactor
                     const rect = annotData?.rect;
@@ -348,9 +376,17 @@ export class copyLinkLib extends PDFPlusLibSubmodule {
         return true;
     }
 
-    copyLinkToAnnotationWithGivenTextAndFile(text: string, file: TFile, child: PDFViewerChild, checking: boolean, templates: { copyFormat: string, displayTextFormat?: string }, page: number, id: string, colorName: string, autoPaste?: boolean) {
+    copyLinkToAnnotationWithGivenTextAndFile(text: string, file: TFile, child: PDFViewerChild, checking: boolean, templates: { copyFormat: string, displayTextFormat?: string }, page: number, id: string, colorName: string, autoPaste?: boolean, annotate?: AnnotateRequest | false) {
         if (!checking) {
             (async () => {
+                const annotated = await this.annotateIfRequested(annotate, {
+                    child, file, page, text, colorName,
+                    subpath: `#page=${page}&annotation=${id}`,
+                    copyFormat: templates.copyFormat,
+                    displayTextFormat: templates.displayTextFormat,
+                });
+                if (annotated) return;
+
                 const evaluated = this.getTextToCopy(child, templates.copyFormat, templates.displayTextFormat, file, page, `#page=${page}&annotation=${id}`, text, colorName);
                 await navigator.clipboard.writeText(evaluated);
                 this.onCopyFinish(evaluated);
@@ -365,7 +401,7 @@ export class copyLinkLib extends PDFPlusLibSubmodule {
     }
 
     // TODO: A better, more concise function name 😅
-    writeHighlightAnnotationToSelectionIntoFileAndCopyLink(checking: boolean, templates: { copyFormat: string, displayTextFormat?: string }, colorName?: string, autoPaste?: boolean): boolean {
+    writeHighlightAnnotationToSelectionIntoFileAndCopyLink(checking: boolean, templates: { copyFormat: string, displayTextFormat?: string }, colorName?: string, autoPaste?: boolean, annotate?: AnnotateRequest | false): boolean {
         // Get and store the selected text before writing file because
         // the file modification will cause the PDF viewer to be reloaded,
         // which will clear the selection.
@@ -393,7 +429,7 @@ export class copyLinkLib extends PDFPlusLibSubmodule {
                         const newPalette = this.lib.getColorPaletteFromChild(child);
                         newPalette?.setStatus('Link copied', this.statusDurationMs);
                         const { r, g, b } = this.plugin.domManager.getRgb(colorName);
-                        this.copyLinkToAnnotationWithGivenTextAndFile(text, file, child, false, templates, page, annotationID, `${r}, ${g}, ${b}`, autoPaste);
+                        this.copyLinkToAnnotationWithGivenTextAndFile(text, file, child, false, templates, page, annotationID, `${r}, ${g}, ${b}`, autoPaste, annotate);
 
                         // TODO: Needs refactor
                         if (rects) {
@@ -862,6 +898,16 @@ export class copyLinkLib extends PDFPlusLibSubmodule {
         this.watchPaste(text, onPaste);
         // update this.lastCopiedDestArray
         this.plugin.lastCopiedDestInfo = null;
+    }
+
+    /**
+     * Adds the annotation to the linked notes if explicitly requested or if auto-annotate is on.
+     * @returns true if the annotation has been handled and nothing should be copied to the clipboard.
+     */
+    async annotateIfRequested(annotate: AnnotateRequest | false | undefined, source: Omit<AnnotationSource, 'explicitFormat'>): Promise<boolean> {
+        if (annotate === false) return false;
+        if (!annotate && !this.settings.autoAnnotate) return false;
+        return await this.lib.annotate.annotate({ ...source, explicitFormat: annotate?.explicitFormat });
     }
 
     /**
