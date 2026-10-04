@@ -35,6 +35,19 @@ export class PDFPlusCommands extends PDFPlusLibSubmodule {
             //     checkCallback: (checking) => this.createCanvasCard(checking)
             // },
             {
+                id: 'annotate-selection',
+                name: 'Annotate selection or annotation (add to linked notes)',
+                checkCallback: (checking) => this.annotate(checking)
+            }, {
+                id: 'toggle-auto-annotate',
+                name: 'Toggle auto-annotate',
+                callback: () => this.plugin.autoAnnotateMode.toggle()
+            }, {
+                id: 'open-linked-notes',
+                name: 'Open the notes linked to this PDF',
+                checkCallback: (checking) => this.openLinkedNotes(checking)
+            },
+            {
                 id: 'context-menu',
                 name: 'Show context menu at selection',
                 checkCallback: (checking) => this.showContextMenu(checking)
@@ -283,6 +296,41 @@ export class PDFPlusCommands extends PDFPlusLibSubmodule {
     createCanvasCard(checking: boolean) {
         if (!this.createCanvasCardFromAnnotation(checking)) {
             return this.createCanvasCardFromSelection(checking);
+        }
+        return true;
+    }
+
+    annotate(checking: boolean) {
+        if (this.lib.annotate.annotateSelection(checking)) return true;
+
+        const info = this.lib.copyLink.getAnnotationLinkInfo();
+        if (!info) return false;
+        const { child, copyButtonEl, template, page, id } = info;
+        const result = this.lib.copyLink.copyLinkToAnnotation(child, checking, { copyFormat: template }, page, id, false, false, {});
+        if (!checking && result) setIcon(copyButtonEl, 'lucide-check');
+        return result;
+    }
+
+    openLinkedNotes(checking: boolean) {
+        const file = this.lib.workspace.getActivePDFView()?.file;
+        if (!file) return false;
+
+        if (!checking) {
+            const notes = this.lib.annotate.getLinkedNotes(file);
+            if (!notes.length) {
+                new Notice(`${this.plugin.manifest.name}: No note links to "${file.name}" in ${this.lib.annotate.getPropertyNames().map((p) => `"${p}"`).join(' or ')}.`);
+                return true;
+            }
+            (async () => {
+                for (const note of notes) {
+                    const leaf = this.lib.workspace.getExistingLeafForMarkdownFile(note);
+                    if (leaf) {
+                        await this.lib.workspace.revealLeaf(leaf);
+                        continue;
+                    }
+                    await this.lib.workspace.getLeaf(this.settings.howToOpenAutoFocusTargetIfNotOpened === 'hover-editor' ? 'right' : this.settings.howToOpenAutoFocusTargetIfNotOpened).openFile(note, { active: false });
+                }
+            })();
         }
         return true;
     }
@@ -995,7 +1043,7 @@ export class PDFPlusCommands extends PDFPlusLibSubmodule {
             }
             text += `- ${key}: ${value}\n`;
         }
-        text += '\n#### PDF++ debug info\n\n';
+        text += '\n#### Annotator Plus debug info\n\n';
         text += '```\n' + JSON.stringify({ settings, styleSettings, styleSheet }) + '\n```\n';
 
         await navigator.clipboard.writeText(text);

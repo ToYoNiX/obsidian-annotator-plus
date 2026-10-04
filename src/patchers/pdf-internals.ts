@@ -4,7 +4,7 @@ import { PDFDocumentProxy } from 'pdfjs-dist';
 
 import PDFPlus from 'main';
 import { PDFAnnotationDeleteModal, PDFAnnotationEditModal } from 'modals';
-import { onContextMenu, onOutlineContextMenu, onThumbnailContextMenu, showContextMenu } from 'context-menu';
+import { onContextMenu, onOutlineContextMenu, onThumbnailContextMenu, showContextMenu, showContextMenuAtSelection } from 'context-menu';
 import { registerAnnotationPopupDrag, registerOutlineDrag, registerThumbnailDrag } from 'drag';
 import { PDFInternalLinkPostProcessor, PDFOutlineItemPostProcessor, PDFThumbnailItemPostProcessor, PDFExternalLinkPostProcessor } from 'post-process';
 import { patchPDFOutlineViewer } from 'patchers';
@@ -151,6 +151,9 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
                     this.component.registerDomEvent(viewerContainerEl, 'pointerdown', (evt) => {
                         lib.highlight.viewer.clearRectHighlight(this);
 
+                        plugin.lastPointerType = evt.pointerType;
+                        plugin.lastPointerDownTime = Date.now();
+
                         updateIsModEvent(evt);
                         // Before Obsidian v1.8.0, I was listening to mouseup event.
                         // However, after then the auto-copy stopped working.
@@ -219,6 +222,24 @@ const patchPDFViewerChild = (plugin: PDFPlus, child: PDFViewerChild) => {
 
                         if (plugin.obsidianHasTextSelectionBug && plugin.settings.fixObsidianTextSelectionBug) {
                             fixTextSelection(evt);
+                        }
+
+                        // On a touch screen, the selection is usually adjusted several times (and a long press
+                        // to open the context menu also ends with pointerup), so copying/annotating on every
+                        // pointerup is not what the user wants. Open the menu instead if requested.
+                        if (plugin.isTouchInteraction(evt) && !plugin.settings.touchAutoCopy) {
+                            if (plugin.settings.touchShowMenuAfterSelection && evt.win.getSelection()?.toString()) {
+                                evt.win.setTimeout(() => {
+                                    const selection = evt.win.getSelection();
+                                    if (!selection?.toString()) return;
+                                    if (Date.now() - plugin.lastTouchMenuTime < 1000) return;
+                                    plugin.lastTouchMenuTime = Date.now();
+                                    showContextMenuAtSelection(plugin, this, selection, true);
+                                }, 300);
+                            }
+                            viewerContainerEl.removeEventListener('pointerup', onPointerUp);
+                            isModEvent = false;
+                            return;
                         }
 
                         if (plugin.settings.autoCopy) {

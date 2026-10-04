@@ -1,12 +1,44 @@
-<h1 align="center">Obsidian PDF++</h1>
-<p align="center">
-<img src="https://img.shields.io/badge/dynamic/json?logo=obsidian&color=%238a5cf5&label=downloads&query=%24%5B%22pdf-plus%22%5D.downloads&url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json" alt="Obsidian Downloads">
-</p>
+<h1 align="center">Annotator Plus</h1>
 
-> [!note] 
-> I’m currently working on PDF++ v1.0.0. Because this release involves extensive refactoring, you probably won’t see any major updates for a few months—aside from minor bug fixes—until I can ship the 1.0.0 beta. But don’t worry: there’s a lot going on under the hood!
-> 
-> ⭐ Star this repo to show your support!
+Annotator Plus is a fork of [PDF++](https://github.com/RyotaUshio/obsidian-pdf-plus) by Ryota Ushio. It keeps everything PDF++ does and adds two things.
+
+### Annotate straight into the notes that link to a PDF
+
+PDF++ copies a link to your selection, and you paste it somewhere yourself. Annotator Plus adds it for you: every note that links to the PDF in a frontmatter property gets the block appended under a heading.
+
+```yaml
+---
+up:
+  - "[[Make It Stick - Peter C. Brown.pdf]]"
+  - "[[Make It Stick - Peter C. Brown.epub]]"
+---
+```
+
+Select text in `Make It Stick - Peter C. Brown.pdf`, choose **Annotate → Callout** in the context menu, and the callout lands under `## Annotations` in that note. The note doesn't have to be open, and nothing is coupled to a single file: a note can list several PDFs, and a PDF can belong to several notes.
+
+- **Context menu**: an "Annotate" section at the top, with one item per copy format.
+- **Command**: "Annotate selection or annotation (add to linked notes)", which you can bind to a hotkey.
+- **Auto-annotate**: a ribbon toggle that turns every copied link into an annotation. Combined with auto-copy, selecting text is all it takes.
+- **Settings** (*Annotate: add to linked notes*):
+  - the property names (default `up`, comma-separated, single link or list)
+  - which notes get it: all linked notes, only the most recently opened one, or the last active note
+  - what to do when no note links to the PDF
+  - the heading (default `## Annotations`) and whether to create it if missing (at the end or the start of the note)
+  - where in the section: bottom, top, or sorted by page number
+  - the annotation format, duplicate skipping, blank lines between blocks, and more
+
+If a target note is open in the editor, the block is inserted through the editor, so your unsaved typing and the undo history are preserved.
+
+### Touch screens
+
+Select text with your finger and long-press it. The menu opens with large items and no nested hover submenus, and the "Customize menu..." settings entry is hidden. Lifting your finger no longer triggers auto-copy. All of this is configurable under *Touch screens*, including a "treat as touch: always" switch for screens that report themselves as a mouse.
+
+> [!warning]
+> Annotator Plus and PDF++ patch the same parts of Obsidian. Don't enable both at the same time.
+
+---
+
+The rest of this README is the original PDF++ documentation.
 
 This is an [Obsidian.md](https://obsidian.md) plugin for a better PDF experience. Specifically:
 

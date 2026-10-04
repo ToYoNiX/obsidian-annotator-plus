@@ -1,6 +1,6 @@
 /* @settings
 
-name: PDF++
+name: Annotator Plus
 id: pdf-plus
 settings:
     - 
@@ -336,10 +336,6 @@ settings:
     &>p:last-child {
         margin-bottom: 0;
     }
-}
-
-.pdf-plus-settings .ignore-split-setting.setting-item {
-    padding-top: 0;
 }
 
 .annotationLayer .popupContent {
@@ -691,4 +687,18 @@ body {
 body.pdf-plus-vim-hint-inverted {
     --pdf-plus-vim-hint-color: var(--text-on-accent);
     --pdf-plus-vim-hint-background-color: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
+}
+
+/* Annotator Plus */
+
+.pdf-plus-settings .pdf-plus-setting-editable-name .setting-item-info > input[type="text"] {
+    width: 100%;
+    max-width: 20em;
+}
+
+/* Finger-friendly context menu opened by a touch interaction (long press) */
+.menu.annotator-plus-touch-menu .menu-item {
+    padding-top: var(--size-4-2);
+    padding-bottom: var(--size-4-2);
+    font-size: var(--font-ui-medium);
 }
