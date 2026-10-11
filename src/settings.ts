@@ -9,6 +9,7 @@ import { ScrollMode, SidebarView, SpreadMode } from 'pdfjs-enums';
 import { Menu } from 'obsidian';
 import { PDFExternalLinkPostProcessor, PDFInternalLinkPostProcessor, PDFOutlineItemPostProcessor, PDFThumbnailItemPostProcessor } from 'post-process';
 import { BibliographyManager } from 'bib';
+import { AnnotationHeadingCreation, AnnotationInsertPosition } from 'utils/insert-under-heading';
 
 
 const SELECTION_BACKLINK_VISUALIZE_STYLE = {
@@ -43,6 +44,39 @@ const AUTO_FOCUS_TARGETS: Record<AutoFocusTarget, string> = {
 	'last-active-and-open-then-last-paste': 'Last active & open .md if any, otherwise last pasted .md',
 };
 
+export const ANNOTATION_TARGETS = {
+	'all': 'All notes that link to the PDF',
+	'last-active-linked': 'Only the most recently opened note among them',
+	'last-active': 'The last active note (no matter what it links to)',
+} as const;
+export type AnnotationTarget = keyof typeof ANNOTATION_TARGETS;
+
+export const ANNOTATION_FALLBACKS = {
+	'clipboard': 'Copy the link to the clipboard instead',
+	'last-active': 'Add it to the last active note',
+	'nothing': 'Do nothing (show a notice)',
+} as const;
+export type AnnotationFallback = keyof typeof ANNOTATION_FALLBACKS;
+
+export const ANNOTATION_HEADING_CREATIONS: Record<AnnotationHeadingCreation, string> = {
+	'end': 'Create it at the end of the note',
+	'start': 'Create it at the start of the note (after the properties)',
+	'never': 'Don\'t create it; skip the note',
+};
+
+export const ANNOTATION_INSERT_POSITIONS: Record<AnnotationInsertPosition, string> = {
+	'bottom': 'At the bottom of the section (newest last)',
+	'top': 'At the top of the section (newest first)',
+	'page': 'Sorted by page number',
+};
+
+export const TOUCH_MODES = {
+	'auto': 'Auto-detect (finger on a touch screen)',
+	'always': 'Always (e.g. if your touch screen is reported as a mouse)',
+	'never': 'Never',
+} as const;
+export type TouchMode = keyof typeof TOUCH_MODES;
+
 const NEW_FILE_LOCATIONS = {
 	'root': 'Vault folder',
 	'current': 'Same folder as current file',
@@ -76,14 +110,14 @@ export const DEFAULT_BACKLINK_HOVER_COLOR = 'green';
 
 const ACTION_ON_CITATION_HOVER = {
 	'none': 'Same as other internal links',
-	'pdf-plus-bib-popover': 'PDF++\'s custom bibliography popover',
+	'pdf-plus-bib-popover': 'Annotator Plus\'s custom bibliography popover',
 	'google-scholar-popover': 'Google Scholar popover',
 } as const;
 
 const MOBILE_COPY_ACTIONS = {
 	'text': 'Copy text',
 	'obsidian': 'Obsidian default (copy as quote)',
-	'pdf-plus': 'Run PDF++\'s copy command',
+	'pdf-plus': 'Run Annotator Plus\'s copy command',
 } as const;
 
 export interface PDFPlusSettings {
@@ -308,6 +342,32 @@ export interface PDFPlusSettings {
 	PATH: string;
 	autoCheckForUpdates: boolean;
 	fixObsidianTextSelectionBug: boolean;
+	// Annotator Plus
+	autoAnnotate: boolean;
+	autoAnnotateToggleRibbonIcon: boolean;
+	autoAnnotateIconName: string;
+	annotationProperties: string;
+	annotationTarget: AnnotationTarget;
+	annotationExcludeTags: string;
+	annotationFallback: AnnotationFallback;
+	annotationHeading: string;
+	annotationCreateHeading: AnnotationHeadingCreation;
+	annotationInsertPosition: AnnotationInsertPosition;
+	annotationBlankLineBetweenBlocks: boolean;
+	annotationTrimEmptyQuoteLines: boolean;
+	annotationCopyFormat: string;
+	annotationSkipDuplicates: boolean;
+	annotationAlsoCopy: boolean;
+	annotationShowNotice: boolean;
+	annotationClearSelection: boolean;
+	annotationScrollOpenNotes: boolean;
+	annotateMenuHiddenFormats: string[];
+	touchMode: TouchMode;
+	touchAutoCopy: boolean;
+	touchShowMenuAfterSelection: boolean;
+	touchFlatMenu: boolean;
+	touchHideCustomizeItem: boolean;
+	touchLargeMenuItems: boolean;
 }
 
 export const DEFAULT_SETTINGS: PDFPlusSettings = {
@@ -373,8 +433,8 @@ export const DEFAULT_SETTINGS: PDFPlusSettings = {
 	highlightExistingTab: false,
 	existingTabHighlightOpacity: 0.5,
 	existingTabHighlightDuration: 0.75,
-	paneTypeForFirstPDFLeaf: 'left',
-	openLinkNextToExistingPDFTab: true,
+	paneTypeForFirstPDFLeaf: '',
+	openLinkNextToExistingPDFTab: false,
 	openPDFWithDefaultApp: false,
 	openPDFWithDefaultAppAndObsidian: true,
 	focusObsidianAfterOpenPDFWithDefaultApp: true,
@@ -442,6 +502,7 @@ export const DEFAULT_SETTINGS: PDFPlusSettings = {
 	replaceContextMenu: true,
 	showContextMenuOnMouseUpIf: 'Mod',
 	contextMenuConfig: [
+		{ id: 'annotate', visible: true },
 		{ id: 'action', visible: true },
 		{ id: 'selection', visible: true },
 		{ id: 'write-file', visible: true },
@@ -593,8 +654,33 @@ export const DEFAULT_SETTINGS: PDFPlusSettings = {
 	vimHintChars: 'hjklasdfgyuiopqwertnmzxcvb',
 	vimHintArgs: 'all',
 	PATH: '',
-	autoCheckForUpdates: true,
+	autoCheckForUpdates: false,
 	fixObsidianTextSelectionBug: true,
+	autoAnnotate: false,
+	autoAnnotateToggleRibbonIcon: true,
+	autoAnnotateIconName: 'lucide-notebook-pen',
+	annotationProperties: 'up',
+	annotationTarget: 'all',
+	annotationExcludeTags: '',
+	annotationFallback: 'clipboard',
+	annotationHeading: '## Annotations',
+	annotationCreateHeading: 'end',
+	annotationInsertPosition: 'bottom',
+	annotationBlankLineBetweenBlocks: true,
+	annotationTrimEmptyQuoteLines: true,
+	annotationCopyFormat: '',
+	annotationSkipDuplicates: true,
+	annotationAlsoCopy: false,
+	annotationShowNotice: true,
+	annotationClearSelection: true,
+	annotationScrollOpenNotes: true,
+	annotateMenuHiddenFormats: [],
+	touchMode: 'auto',
+	touchAutoCopy: false,
+	touchShowMenuAfterSelection: false,
+	touchFlatMenu: true,
+	touchHideCustomizeItem: true,
+	touchLargeMenuItems: true,
 };
 
 
@@ -657,7 +743,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 						item.setTitle('Copy link to this setting')
 							.setIcon('lucide-link')
 							.onClick(() => {
-								navigator.clipboard.writeText(`obsidian://pdf-plus?setting=${settingName}`);
+								navigator.clipboard.writeText(`obsidian://${this.plugin.manifest.id}?setting=${settingName}`);
 							});
 					})
 					.showAtMouseEvent(evt);
@@ -693,7 +779,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 					item.setTitle('Copy link to this heading')
 						.setIcon('lucide-link')
 						.onClick(() => {
-							navigator.clipboard.writeText(`obsidian://pdf-plus?setting=heading:${id}`);
+							navigator.clipboard.writeText(`obsidian://${this.plugin.manifest.id}?setting=heading:${id}`);
 						});
 				})
 				.showAtMouseEvent(evt);
@@ -953,8 +1039,19 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 	}
 
 	addDesc(desc: string) {
+		// Rendered like a heading's description so that it is not drawn as an empty card by themes
 		return this.addSetting()
+			.setHeading()
 			.setDesc(desc);
+	}
+
+	/** Moves the first text input of a setting from the control area to the name area, for rows whose name is editable. */
+	moveTextInputToNameArea(setting: Setting) {
+		const inputEl = setting.controlEl.querySelector<HTMLInputElement>('input[type="text"]');
+		if (inputEl) {
+			setting.infoEl.appendChild(inputEl);
+			setting.settingEl.addClass('pdf-plus-setting-editable-name');
+		}
 	}
 
 	addFileLocationSetting(
@@ -1097,7 +1194,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 			'lucide-heart',
 			({ iconEl }) => postProcessIcon(iconEl)
 		)
-			.setDesc('If you find PDF++ helpful, please consider supporting the development to help me keep this plugin alive.\n\nIf you prefer PayPal, please make donations via Ko-fi. Thank you!')
+			.setDesc('Annotator Plus is a fork of PDF++ by Ryota Ushio. If you find it helpful, please consider supporting the original author.\n\nIf you prefer PayPal, please make donations via Ko-fi.')
 			.then((setting) => {
 				const infoEl = setting.infoEl;
 				const iconEl = setting.settingEl.firstElementChild;
@@ -1190,6 +1287,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 						this.plugin.loadStyle();
 					});
 			})
+			.then((setting) => this.moveTextInputToNameArea(setting))
 			.addColorPicker((picker) => {
 				picker.setValue(color);
 				picker.onChange(async (newColor) => {
@@ -1280,6 +1378,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 			})
+			.then((setting) => this.moveTextInputToNameArea(setting))
 			.then((setting) => {
 				if (configs.value.hasOwnProperty('formRows')) {
 					setting.addTextArea((textarea) => {
@@ -1328,8 +1427,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 						this.redisplay();
 					});
-			})
-			.setClass('no-border');
+			});
 	}
 
 	addNamedTemplatesSetting(items: NamedTemplate[], index: number, defaultIndexKey: KeysOfType<PDFPlusSettings, number>, configs: Parameters<PDFPlusSettingTab['addNameValuePairListSetting']>[4]) {
@@ -1530,9 +1628,6 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 							this.redisplay();
 						});
 					dropdowns.push(dropdown);
-				})
-				.then((setting) => {
-					setting.settingEl.addClasses(['no-border', 'small-padding']);
 				});
 		}
 
@@ -1612,12 +1707,13 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 				'> [!TIP]',
 				'> - You can easily navigate through the settings by clicking the icons in the header above.',
 				'> - Some settings below require reopening tabs or reloading the plugin to take effect.',
-				'> - [Visit the docs](https://ryotaushio.github.io/obsidian-pdf-plus/)',
+				'> - New in Annotator Plus: the **Annotate** section right below (adds annotations straight to the notes that link to a PDF) and the **Touch screens** section.',
+				'> - [Visit the PDF++ docs](https://ryotaushio.github.io/obsidian-pdf-plus/) (Annotator Plus is based on PDF++)',
 				'> - <a id="pdf-plus-funding-link-placeholder"></a>',
 			], el);
 			const linkEl = document.getElementById('pdf-plus-funding-link-placeholder');
 			if (linkEl) {
-				linkEl.textContent = 'Help me keep PDF++ alive!';
+				linkEl.textContent = 'Support the author of PDF++, which this plugin is based on';
 				linkEl.onclick = (evt) => {
 					this.scrollToHeading('funding', { behavior: 'smooth' });
 					this.updateHeaderElClassOnScroll(evt);
@@ -1626,10 +1722,128 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 		});
 
 
+		this.addHeading('Annotate: add to linked notes', 'annotate', 'lucide-notebook-pen')
+			.setDesc(createFragment((el) => {
+				el.appendText('Instead of copying a link and pasting it yourself, ');
+				el.createEl('b', { text: 'Annotate' });
+				el.appendText(' adds the block straight to every note that links to the PDF in a property (for example a book note with the PDF in its "up" list), under a heading of your choice. Use the "Annotate" items at the top of the context menu (long-press with a finger), the "Annotate selection" command, or turn on auto-annotate below.');
+			}));
+		this.addTextSetting('annotationProperties', 'up', () => this.redisplay())
+			.setName('Properties that link a note to its PDF')
+			.setDesc('A note receives the annotations of every PDF it links in one of these frontmatter properties. A single link or a list both work, e.g. up: ["[[Book.pdf]]", "[[Book.epub]]"]. Separate several property names with commas.');
+		this.addDropdownSetting('annotationTarget', ANNOTATION_TARGETS)
+			.setName('Which notes to add the annotation to')
+			.setDesc('When several notes link to the same PDF, add the annotation to all of them, or only to the one you opened most recently. The last option ignores the property and always uses the note you were last in.');
+		this.addTextSetting('annotationExcludeTags', 'document/mine')
+			.setName('Never add annotations to notes with these tags')
+			.setDesc('Comma-separated, without "#". Nested tags count too: "document" also excludes "document/mine". Useful for notes whose body is exported as-is.');
+		this.addDropdownSetting('annotationFallback', ANNOTATION_FALLBACKS)
+			.setName('When no note links to the PDF');
+		this.addTextSetting('annotationHeading', '## Annotations')
+			.setName('Heading to add annotations under')
+			.setDesc('The whole heading line, including its level, e.g. "## Annotations" or "### Highlights". Matching ignores case. Annotations go at the end of this heading\'s section, i.e. before the next heading of the same or a higher level, so subheadings inside it are kept.');
+		this.addDropdownSetting('annotationCreateHeading', ANNOTATION_HEADING_CREATIONS)
+			.setName('If the note doesn\'t have that heading');
+		this.addDropdownSetting('annotationInsertPosition', ANNOTATION_INSERT_POSITIONS)
+			.setName('Where in the section')
+			.setDesc('"Sorted by page number" places the new block before the first existing block of the same PDF with a later page, so a book\'s annotations stay in reading order.');
+		this.addToggleSetting('annotationBlankLineBetweenBlocks')
+			.setName('Blank line between annotations')
+			.setDesc('Keep this on if you use callouts or quotes: without a blank line, two adjacent callouts are merged into one.');
+		this.addToggleSetting('annotationTrimEmptyQuoteLines')
+			.setName('Remove empty trailing quote lines')
+			.setDesc('Some copy formats (e.g. "Quote in callout") end with empty "> " lines so you can type a comment right after pasting. When annotating they would only leave empty lines in your note.');
+		this.addSetting('annotationCopyFormat')
+			.setName('Annotation format')
+			.setDesc(createFragment((el) => {
+				el.appendText('Which copy format to use for annotations added by auto-annotate or the "Annotate selection" command. The context menu lets you pick a format each time. Formats are edited in ');
+				el.appendChild(this.createLinkToHeading('template', 'Copy templates'));
+				el.appendText('.');
+			}))
+			.addDropdown((dropdown) => {
+				dropdown.addOption('', 'Same as the color palette');
+				for (const { name } of this.plugin.settings.copyCommands) {
+					dropdown.addOption(name, name);
+				}
+				dropdown.setValue(this.plugin.settings.copyCommands.some(({ name }) => name === this.plugin.settings.annotationCopyFormat) ? this.plugin.settings.annotationCopyFormat : '')
+					.onChange(async (value) => {
+						this.plugin.settings.annotationCopyFormat = value;
+						await this.plugin.saveSettings();
+					});
+			});
+		this.addToggleSetting('annotationSkipDuplicates')
+			.setName('Skip duplicates')
+			.setDesc('Don\'t add an annotation if the note already links to exactly the same selection or PDF annotation.');
+		this.addToggleSetting('annotationAlsoCopy')
+			.setName('Also copy to the clipboard')
+			.setDesc('Copy the block to the clipboard as well after adding it to the notes.');
+		this.addToggleSetting('annotationShowNotice')
+			.setName('Show a notice after annotating')
+			.setDesc('The color palette in the PDF toolbar always shows a short status message as well.');
+		this.addToggleSetting('annotationClearSelection')
+			.setName('Clear the text selection after annotating');
+		this.addToggleSetting('annotationScrollOpenNotes')
+			.setName('Scroll open notes to the new annotation')
+			.setDesc('If a target note is open in a tab, scroll it to show the newly added block. The note is never opened or focused for you.');
+		this.addSetting()
+			.setName('Check the active PDF')
+			.setDesc('Lists the notes that would receive an annotation from the PDF you have open right now.')
+			.addButton((button) => {
+				button.setButtonText('Check')
+					.onClick(() => {
+						const activeFile = this.app.workspace.getActiveFile();
+						const file = this.plugin.lib.workspace.getActivePDFView()?.file
+							?? (activeFile?.extension === 'pdf' ? activeFile : null);
+						if (!file) {
+							new Notice(`${this.plugin.manifest.name}: Open a PDF first.`);
+							return;
+						}
+						const { targets, isFallback } = this.plugin.lib.annotate.getTargets(file);
+						new Notice(
+							targets.length
+								? `${this.plugin.manifest.name}: Annotations from "${file.name}" go to:\n${targets.map((t) => '- ' + t.path).join('\n')}${isFallback ? '\n(fallback: last active note)' : ''}`
+								: `${this.plugin.manifest.name}: No note links to "${file.name}".`,
+							8000
+						);
+					});
+			});
+
+		this.addHeading('Formats shown in the "Annotate" menu', 'annotate-menu-formats')
+			.setDesc('Choose which copy formats appear as items under "Annotate" in the context menu.');
+		for (const { name } of this.plugin.settings.copyCommands) {
+			this.addSetting()
+				.setName(name)
+				.addToggle((toggle) => {
+					toggle.setValue(!this.plugin.settings.annotateMenuHiddenFormats.includes(name))
+						.onChange(async (value) => {
+							const hidden = this.plugin.settings.annotateMenuHiddenFormats.filter((n) => n !== name);
+							if (!value) hidden.push(name);
+							this.plugin.settings.annotateMenuHiddenFormats = hidden;
+							await this.plugin.saveSettings();
+						});
+				});
+		}
+		this.addHeading('Auto-annotate', 'auto-annotate')
+			.setDesc('When on, every link you would copy to a PDF selection or annotation (via auto-copy, the color palette, or the copy command) is added to the linked notes instead. The "Copy link..." items in the context menu still copy.');
+		this.addToggleSetting('autoAnnotate', () => this.plugin.autoAnnotateMode.toggle(this.plugin.settings.autoAnnotate))
+			.setName('Enable auto-annotate')
+			.setDesc('Tip: together with auto-copy, selecting text with the mouse is all it takes to annotate.');
+		this.addToggleSetting('autoAnnotateToggleRibbonIcon', () => this.redisplay())
+			.setName('Show an icon to toggle auto-annotate in the left ribbon menu')
+			.setDesc('You can also toggle this mode with a command. Reload the plugin after changing this setting.');
+		if (this.plugin.settings.autoAnnotateToggleRibbonIcon) {
+			this.addIconSetting('autoAnnotateIconName', false)
+				.setName('Icon name')
+				.then((setting) => {
+					setting.descEl.appendText(' Reload the plugin after changing this setting.');
+				});
+		}
+
+
 		this.addHeading('Editing PDF files', 'edit', 'lucide-save')
 			.then((setting) => {
 				this.renderMarkdown([
-					'By allowing PDF++ to modify PDF files directly, you can:',
+					'By allowing Annotator Plus to modify PDF files directly, you can:',
 					'- Add, edit and delete highlights and links in PDF files.',
 					'- Add, insert, delete or extract PDF pages and auto-update links.',
 					'- Add, rename, move and delete outline items.',
@@ -1642,7 +1856,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 			.setName('Enable PDF editing')
 			.then((setting) => {
 				this.renderMarkdown([
-					'PDF++ will not modify PDF files themselves unless you turn on this option. <span style="color: var(--text-warning);">The author assumes no responsibility for any data corruption. Please make sure you have a backup of your files.</span> Also note that PDF++ currently does not support editing encrypted PDFs.',
+					'Annotator Plus will not modify PDF files themselves unless you turn on this option. <span style="color: var(--text-warning);">The author assumes no responsibility for any data corruption. Please make sure you have a backup of your files.</span> Also note that Annotator Plus currently does not support editing encrypted PDFs.',
 				], setting.descEl);
 			});
 		if (this.plugin.settings.enablePDFEdit) {
@@ -1702,7 +1916,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 		}
 		this.addSetting('ignoreExistingMarkdownTabIn')
 			.setName('Ignore existing markdown tabs in...')
-			.setDesc('If some notes are opened in the ignored splits, PDF++ will still open the backlink in the way specified in the previous setting. For example, you might want to ignore the left sidebar if you are pinning a certain note (e.g. daily note) in it.');
+			.setDesc('If some notes are opened in the ignored splits, Annotator Plus will still open the backlink in the way specified in the previous setting. For example, you might want to ignore the left sidebar if you are pinning a certain note (e.g. daily note) in it.');
 		const splits = {
 			'leftSplit': 'Left sidebar',
 			'rightSplit': 'Right sidebar',
@@ -1712,6 +1926,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 		for (const [_split, displayName] of Object.entries(splits)) {
 			const split = _split as keyof typeof splits;
 			this.addSetting()
+				.setName(displayName)
 				.addToggle((toggle) => {
 					toggle
 						.setValue(ignoredSplits.includes(split))
@@ -1719,10 +1934,6 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 							value ? ignoredSplits.push(split) : ignoredSplits.remove(split);
 							this.plugin.saveSettings();
 						});
-				})
-				.then((setting) => {
-					setting.controlEl.prepend(createEl('span', { text: displayName }));
-					setting.settingEl.addClasses(['no-border', 'ignore-split-setting']);
 				});
 		}
 
@@ -1753,8 +1964,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 					});
 			});
 		for (let i = 0; i < Object.keys(this.plugin.settings.colors).length; i++) {
-			this.addColorSetting(i)
-				.setClass('no-border');
+			this.addColorSetting(i);
 		}
 
 		this.addToggleSetting('highlightColorSpecifiedOnly', () => this.redisplay())
@@ -1832,7 +2042,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 			}));
 
 
-		this.addHeading('PDF++ callouts', 'callout', 'lucide-quote')
+		this.addHeading('Annotator Plus callouts', 'callout', 'lucide-quote')
 			.then((setting) => {
 				this.renderMarkdown(
 					'Create [callouts](https://help.obsidian.md/Editing+and+formatting/Callouts) with the same color as the highlight color without any CSS snippet scripting.',
@@ -1840,7 +2050,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 				);
 			});
 		this.addToggleSetting('useCallout')
-			.setName('Use PDF++ callouts')
+			.setName('Use Annotator Plus callouts')
 			.then((setting) => {
 				this.renderMarkdown([
 					'You can also disable this option and choose to use your own custom [CSS snippets](https://help.obsidian.md/Extending+Obsidian/CSS+snippets). See our [README](https://github.com/RyotaUshio/obsidian-pdf-plus?tab=readme-ov-file#css-customization) for the details.'
@@ -1970,7 +2180,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 		this.addHeading('Context menu in PDF viewer', 'context-menu', 'lucide-mouse-pointer-click')
 			.setDesc('(Desktop & tablet only) Customize the behavior of the context menu that pops up when you right-click in the PDF viewer. For mobile users, see also the next section.');
 		this.addToggleSetting('replaceContextMenu', () => this.redisplay())
-			.setName('Replace the built-in context menu with PDF++\'s custom menu');
+			.setName('Replace the built-in context menu with Annotator Plus\'s custom menu');
 		if (!this.plugin.settings.replaceContextMenu) {
 			this.addSetting()
 				.setName('Display text format')
@@ -2001,6 +2211,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 				// .setDesc('Customize which menu items to show in what order.');
 
 				const itemOrSectionName: Record<string, string> = {
+					'annotate': 'Annotate (add to linked notes)',
 					'action': 'Look up "(selection)"',
 					'selection': 'Copy link to selection',
 					'write-file': `Add ${this.plugin.settings.selectionBacklinkVisualizeStyle} to file`,
@@ -2107,6 +2318,28 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 		}
 
 
+		this.addHeading('Touch screens', 'touch', 'lucide-hand')
+			.setDesc('Long-press a text selection with your finger to open the context menu. These options make that menu and selection work well with touch.');
+		this.addDropdownSetting('touchMode', TOUCH_MODES, () => this.redisplay())
+			.setName('Use touch behavior')
+			.setDesc('If your touch screen is reported as a mouse, so these options seem to do nothing, choose "Always".');
+		this.addToggleSetting('touchFlatMenu')
+			.setName('Flat menu')
+			.setDesc('Show the "Copy link to selection" and similar items without nested submenus, which only open on hover. Pick the color in the PDF toolbar instead.');
+		this.addToggleSetting('touchHideCustomizeItem')
+			.setName('Hide "Customize menu..." from the touch menu')
+			.setDesc('So that a stray tap doesn\'t open the settings.');
+		this.addToggleSetting('touchLargeMenuItems')
+			.setName('Larger menu items')
+			.setDesc('Easier to hit with a finger.');
+		this.addToggleSetting('touchAutoCopy')
+			.setName('Auto-copy / auto-annotate when lifting the finger')
+			.setDesc('Off by default, because adjusting a touch selection, or long-pressing to open the menu, would copy or annotate every time.');
+		this.addToggleSetting('touchShowMenuAfterSelection')
+			.setName('Open the menu as soon as you finish selecting')
+			.setDesc('For devices where a long press doesn\'t open the context menu.');
+
+
 		this.addHeading('Copying on mobile', 'mobile-copy', 'lucide-smartphone');
 		this.addDropdownSetting('mobileCopyAction', MOBILE_COPY_ACTIONS)
 			.setName(`Action triggered by selecting "Copy" option on mobile devices`);
@@ -2117,7 +2350,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 			.setName('Set up hotkeys for copying links')
 			.then((setting) => {
 				this.renderMarkdown([
-					'PDF++ offers two commands for quickly copying links via hotkeys.',
+					'Annotator Plus offers two commands for quickly copying links via hotkeys.',
 					'',
 					'1. **Copy link to selection or annotation:**',
 					'   Copies a link to the text selection or focused annotation in the PDF viewer, which is formatted according to the options specified in the PDF toolbar.',
@@ -2141,7 +2374,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 		this.addSetting()
 			.then((setting) => {
 				this.renderMarkdown([
-					'PDF++ also offers the following commands for reducing mouse clicks on the PDF toolbar by assigning hotkeys to them.',
+					'Annotator Plus also offers the following commands for reducing mouse clicks on the PDF toolbar by assigning hotkeys to them.',
 					'',
 					'- **Show outline** / **show thumbnail**',
 					'- **Close PDF siderbar**',
@@ -2185,7 +2418,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 				'- `file` or `pdf`: The PDF file ([`TFile`](https://docs.obsidian.md/Reference/TypeScript+API/TFile)). Use `file.basename` for the file name without extension, `file.name` for the file name with extension, `file.path` for the full path relative to the vault root, etc.',
 				'- `page`: The page number (`Number`). The first page is always page 1.',
 				'- `pageLabel`: The page number displayed in the counter in the toolbar (`String`). This can be different from `page`.',
-				'    - **Tip**: You can modify page labels with PDF++\'s "Edit page labels" command.',
+				'    - **Tip**: You can modify page labels with Annotator Plus\'s "Edit page labels" command.',
 				'- `pageCount`: The total number of pages (`Number`).',
 				'- `text` or `selection`: The selected text (`String`). In the case of links to annotations written directly in the PDF file, this is the text covered by the annotation.',
 				'- `comment`: In the case of links to annotations written directly in the PDF file, this is the comment associated with the annotation (`String`). Otherwise, it is an empty string `""`.',
@@ -2214,7 +2447,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 					'<span style="color: var(--text-warning);">[Dataview](obsidian://show-plugin?id=dataview)\'s inline field syntax such as `' + this.plugin.settings.proxyMDProperty + ':: [[file.pdf]]` is supported for the time being, but it is deprecated and will likely not work in the future.</span>',
 					'',
 					'Remarks:',
-					'- Make sure the associated markdown file can be uniquely identified. For example, if you have two markdown files `file1.md` and `file2.md` and both of their `' + this.plugin.settings.proxyMDProperty + '` properties point to the same PDF file, PDF++ cannot determine which markdown file is associated with `file.pdf`. However, PDF++ v1.0.0 or later will add support for this.',
+					'- Make sure the associated markdown file can be uniquely identified. For example, if you have two markdown files `file1.md` and `file2.md` and both of their `' + this.plugin.settings.proxyMDProperty + '` properties point to the same PDF file, Annotator Plus cannot determine which markdown file is associated with `file.pdf`.',
 					'- If you are in Source Mode, be sure to enclose the link in double quotes.',
 				], setting.descEl);
 			});
@@ -2416,7 +2649,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 			this.showConditionally(
 				this.addToggleSetting('closeHoverEditorWhenLostFocus')
 					.setName('Close Hover Editor when it loses focus')
-					.setDesc('This option will not affect the behavior of Hover Editor outside of PDF++.'),
+					.setDesc('This option will not affect the behavior of Hover Editor outside of Annotator Plus.'),
 				() => this.plugin.settings.howToOpenAutoFocusTargetIfNotOpened === 'hover-editor'
 			);
 			this.addToggleSetting('closeSidebarWhenLostFocus')
@@ -2429,8 +2662,8 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 		}
 		this.addToggleSetting('executeCommandWhenTargetNotIdentified', () => this.redisplay())
 			.setName('Execute command when target file cannot be determined')
-			.setDesc('When PDF++ cannot determine which markdown file to focus on or paste to, it will execute the command specified in the next option to let you pick a target file.');
-		const commandName = this.app.commands.findCommand(`${this.plugin.manifest.id}:create-new-note`)?.name ?? 'PDF++: Create new note for auto-focus or auto-paste';
+			.setDesc('When Annotator Plus cannot determine which markdown file to focus on or paste to, it will execute the command specified in the next option to let you pick a target file.');
+		const commandName = this.app.commands.findCommand(`${this.plugin.manifest.id}:create-new-note`)?.name ?? 'Annotator Plus: Create new note for auto-focus or auto-paste';
 		if (this.plugin.settings.executeCommandWhenTargetNotIdentified) {
 			this.addSetting('commandToExecuteWhenTargetNotIdentified')
 				.setName('Command to execute')
@@ -2627,7 +2860,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 						this.renderMarkdown([
 							'The path to the [AnyStyle](https://github.com/inukshuk/anystyle) executable. ',
 							'',
-							'PDF++ extracts the bibliography text from the PDF file for each citation link and uses AnyStyle to convert the extracted text into a structured metadata.',
+							'Annotator Plus extracts the bibliography text from the PDF file for each citation link and uses AnyStyle to convert the extracted text into a structured metadata.',
 							'It works just fine without AnyStyle, but you can further boost the visibility by installing it and providing its path here.',
 							'',
 							'Note: This setting is saved in the [local storage](https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage) instead of `data.json` in the plugin folder.'
@@ -2844,7 +3077,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 					'Each page in a PDF document can be assigned a ***page label***, which can be different from the page indices.',
 					'For example, a book might have a preface numbered as "i", "ii", "iii", ... and the main content numbered as "1", "2", "3", ...',
 					'',
-					'PDF++ allows you to choose whether page labels should be kept unchanged or updated when inserting/removing/extracting pages. [Learn more](https://github.com/RyotaUshio/obsidian-pdf-plus/wiki/Page-labels)',
+					'Annotator Plus allows you to choose whether page labels should be kept unchanged or updated when inserting/removing/extracting pages. [Learn more](https://github.com/RyotaUshio/obsidian-pdf-plus/wiki/Page-labels)',
 					'',
 					'You can also modify page labels directly using the command "Edit page labels".'
 				], setting.descEl);
@@ -2962,7 +3195,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 			.setName('Trim selection/annotation embeds')
 			.then((setting) => {
 				this.renderMarkdown([
-					'<span style="color: var(--text-warning);">(Deprecated in favor of the <a href="https://ryotaushio.github.io/obsidian-pdf-plus/embedding-rectangular-selections.html" class="external-link" target="_blank" rel="noopener">rectangular selection embed feature</a> introduced in PDF++ 0.36.0)</span>',
+					'<span style="color: var(--text-warning);">(Deprecated in favor of the <a href="https://ryotaushio.github.io/obsidian-pdf-plus/embedding-rectangular-selections.html" class="external-link" target="_blank" rel="noopener">rectangular selection embed feature</a> introduced in Annotator Plus 0.36.0)</span>',
 					'When embedding a selection or an annotation from a PDF file, only the target selection/annotation and its surroundings are displayed rather than the entire page.'
 				], setting.descEl);
 			});
@@ -3009,7 +3242,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 			this.addDropdownSetting(
 				'backlinkHoverColor',
 				['', ...Object.keys(this.plugin.settings.colors)],
-				(option) => option || 'PDF++ default',
+				(option) => option || 'Annotator Plus default',
 				() => this.plugin.loadStyle()
 			)
 				.setName('Highlight color for hover sync (Backlinks pane → PDF viewer)')
@@ -3192,7 +3425,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 				.setName('Vimrc file path (optional)')
 				.then(async (setting) => {
 					await this.renderMarkdown([
-						'Only the [Ex commands supported by PDF++](https://github.com/RyotaUshio/obsidian-pdf-plus/blob/main/src/vim/ex-commands.ts) are allowed.',
+						'Only the [Ex commands supported by Annotator Plus](https://github.com/RyotaUshio/obsidian-pdf-plus/blob/main/src/vim/ex-commands.ts) are allowed.',
 						'',
 						'Example (not necessarily recommendations):',
 						'```',
@@ -3214,7 +3447,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 						'map <C-i> :obcommand app:go-forward',
 						'```',
 						'',
-						'After changing the path or the file content, you need to reopen the PDF viewer. If the vimrc file is a hidden file or is under a hidden folder, you need to reload PDF++ or the app.',
+						'After changing the path or the file content, you need to reopen the PDF viewer. If the vimrc file is a hidden file or is under a hidden folder, you need to reload Annotator Plus or the app.',
 					], setting.descEl);
 
 					const inputEl = (setting.components[0] as TextComponent).inputEl;
@@ -3284,7 +3517,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 						'',
 						'This is inspired by [Tridactyl](https://github.com/tridactyl/tridactyl)\'s hint mode.',
 						'',
-						'Also check out Style Settings > PDF++ > Vim keybindings > Hint mode.'
+						'Also check out Style Settings > Annotator Plus > Vim keybindings > Hint mode.'
 					], setting.descEl);
 				}),
 			this.addTextSetting('vimHintChars')
@@ -3323,7 +3556,7 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 		this.addHeading('Misc', 'misc', 'lucide-more-horizontal');
 		this.addToggleSetting('autoCheckForUpdates', () => this.plugin.checkForUpdatesIfNeeded())
 			.setName('Automatically check for updates')
-			.setDesc('If enabled, PDF++ will automatically check for updates every 24 hours and notify you if a new version is available.');
+			.setDesc('If enabled, Annotator Plus will automatically check for updates every 24 hours and notify you if a new version is available.');
 		this.addToggleSetting('fixObsidianTextSelectionBug')
 			.setName(`Fix Obsidian 1.9's text selection bug`)
 			.then((setting) => {
@@ -3376,12 +3609,12 @@ export class PDFPlusSettingTab extends PluginSettingTab {
 					}
 				})
 				.setName('"PATH" environment variable')
-				.setDesc('Provide the "PATH" environment variable for PDF++ to run shell commands without the full paths specified. In MacOS and Linux, you can run "echo $PATH" in Terminal and then copy & paste the result here. Currently, it will be used only when you run ":!<command>" in Vim mode.');
+				.setDesc('Provide the "PATH" environment variable for Annotator Plus to run shell commands without the full paths specified. In MacOS and Linux, you can run "echo $PATH" in Terminal and then copy & paste the result here. Currently, it will be used only when you run ":!<command>" in Vim mode.');
 		}
 
 
 		this.addHeading('Style settings', 'style-settings', 'lucide-settings-2')
-			.setDesc('You can find more options in Style Settings > PDF++.')
+			.setDesc('You can find more options in Style Settings > Annotator Plus.')
 			.addButton((button) => {
 				button.setButtonText('Open style settings')
 					.onClick(() => {

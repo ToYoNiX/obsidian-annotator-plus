@@ -4,6 +4,7 @@ import * as pdflib from '@cantoo/pdf-lib';
 import { patchPDFView, patchPDFInternals, patchBacklink, patchWorkspace, patchPagePreview, patchClipboardManager, patchPDFInternalFromPDFEmbed, patchMenu } from 'patchers';
 import { PDFPlusLib } from 'lib';
 import { AutoCopyMode } from 'auto-copy';
+import { AutoAnnotateMode } from 'auto-annotate';
 import { ColorPalette } from 'color-palette';
 import { DomManager } from 'dom-manager';
 import { PDFCroppedEmbed } from 'pdf-cropped-embed';
@@ -28,11 +29,12 @@ export default class PDFPlus extends Plugin {
 	domManager: DomManager;
 	/** When loaded, just selecting a range of text in a PDF viewer will run the `copy-link-to-selection` command. */
 	autoCopyMode: AutoCopyMode;
+	autoAnnotateMode: AutoAnnotateMode;
 	/** A ribbon icon to toggle auto-focus mode */
 	autoFocusToggleIconEl: HTMLElement | null = null;
 	/** A ribbon icon to toggle auto-paste mode */
 	autoPasteToggleIconEl: HTMLElement | null = null;
-	/** PDF++ relies on monkey-patching several aspects of Obsidian's internals. This property keeps track of the patching status (succeeded or not). */
+	/** Annotator Plus (like PDF++) relies on monkey-patching several aspects of Obsidian's internals. This property keeps track of the patching status (succeeded or not). */
 	patchStatus = {
 		workspace: false,
 		pagePreview: false,
@@ -65,6 +67,11 @@ export default class PDFPlus extends Plugin {
 	 */
 	lastPasteFile: TFile | null = null;
 	lastActiveMarkdownFile: TFile | null = null;
+	/** The pointer type ('mouse', 'touch' or 'pen') of the last pointerdown event in a PDF viewer, and when it happened. */
+	lastPointerType: string | null = null;
+	lastPointerDownTime = 0;
+	/** When the context menu was last shown in response to a touch interaction. Used to avoid showing it twice. */
+	lastTouchMenuTime = 0;
 	/** Tracks the PDFViewerChild instance that an annotation popup was rendered on for the last time. */
 	lastAnnotationPopupChild: PDFViewerChild | null = null;
 	/** Stores the file and the explicit destination array corresponding to the last link copied with the "Copy link to current page view" command */
@@ -117,7 +124,7 @@ export default class PDFPlus extends Plugin {
 
 		this.startTrackingActiveMarkdownFile();
 
-		this.registerObsidianProtocolHandler('pdf-plus', this.obsidianProtocolHandler.bind(this));
+		this.registerObsidianProtocolHandler(this.manifest.id, this.obsidianProtocolHandler.bind(this));
 
 		this.addSettingTab(this.settingTab = new PDFPlusSettingTab(this));
 
@@ -239,6 +246,11 @@ export default class PDFPlus extends Plugin {
 			delete this.settings.aliasFormat;
 		}
 
+		// Annotator Plus: the "Annotate" section was added to the context menu
+		if (!this.settings.contextMenuConfig.some(({ id }) => id === 'annotate')) {
+			this.settings.contextMenuConfig.unshift({ id: 'annotate', visible: true });
+		}
+
 		if (this.settings.hasOwnProperty('showCopyLinkToSearchInContextMenu')) {
 			const searchSectionConfig = this.settings.contextMenuConfig.find(({ id }) => id === 'search');
 			if (searchSectionConfig) {
@@ -312,9 +324,9 @@ export default class PDFPlus extends Plugin {
 			const notice = new Notice('', 0)
 				.setMessage(createFragment((el) => {
 					const linkEl = createEl('a', {
-						href: 'obsidian://pdf-plus?setting=' + settingId
+						href: `obsidian://${this.manifest.id}?setting=` + settingId
 					});
-					el.append('PDF++: ');
+					el.append('Annotator Plus: ');
 					setMessage(el, linkEl);
 				}));
 			notice.containerEl.addClass('pdf-plus-deprecated-setting-notice');
@@ -402,7 +414,7 @@ export default class PDFPlus extends Plugin {
 
 			const notice = new Notice(
 				createFragment((el) => el.append(
-					`PDF++: Please consider moving the "${this.settings.proxyMDProperty}" Dataview inline fields to the properties (YAML frontmatter).`,
+					`Annotator Plus: Please consider moving the "${this.settings.proxyMDProperty}" Dataview inline fields to the properties (YAML frontmatter).`,
 					createEl('br'),
 					'Click ',
 					createEl('a', {
@@ -463,6 +475,10 @@ export default class PDFPlus extends Plugin {
 		this.autoCopyMode = new AutoCopyMode(this);
 		this.autoCopyMode.toggle(this.settings.autoCopy);
 		this.register(() => this.autoCopyMode.unload());
+
+		this.autoAnnotateMode = new AutoAnnotateMode(this);
+		this.autoAnnotateMode.toggle(this.settings.autoAnnotate);
+		this.register(() => this.autoAnnotateMode.unload());
 
 		if (this.settings.autoFocusToggleRibbonIcon) {
 			let menuShown = false;
@@ -758,6 +774,23 @@ export default class PDFPlus extends Plugin {
 		this.registerEvent(this.app.workspace.on('editor-drop', (evt, editor, info) => this.lib.dummyFileManager.createDummyFilesOnEditorDrop(evt, editor, info)));
 	}
 
+	/**
+	 * Whether the current interaction in a PDF viewer comes from a touch screen.
+	 * The pointerdown that started the gesture is trusted over `evt.pointerType`, because
+	 * Chromium reports the contextmenu event fired by a touch long press as a mouse event.
+	 */
+	isTouchInteraction(evt?: MouseEvent) {
+		if (this.settings.touchMode === 'always') return true;
+		if (this.settings.touchMode === 'never') return false;
+		if (this.lastPointerType && Date.now() - this.lastPointerDownTime < 10000) {
+			return this.lastPointerType === 'touch';
+		}
+		if (evt && 'pointerType' in evt && typeof evt.pointerType === 'string') {
+			return evt.pointerType === 'touch';
+		}
+		return false;
+	}
+
 	registerOneTimeEvent<T extends Events>(events: T, ...[evt, callback, ctx]: OverloadParameters<T['on']>) {
 		const eventRef = events.on(evt, (...args: any[]) => {
 			callback.call(ctx, ...args);
@@ -776,10 +809,10 @@ export default class PDFPlus extends Plugin {
 			this.app.workspace.onLayoutReady(() => {
 				new Notice(createFragment((el) => {
 					el.append(
-						'PDF++: There is a newer version available! ',
+						'Annotator Plus: There is a newer version available! ',
 						createEl('a', {
 							text: 'Update now',
-							href: 'obsidian://show-plugin?id=pdf-plus',
+							href: 'https://github.com/ToYoNiX/obsidian-annotator-plus/releases',
 						})
 					);
 				}));
@@ -795,32 +828,32 @@ export default class PDFPlus extends Plugin {
 	private registerHoverLinkSources() {
 		this.registerHoverLinkSource('pdf-plus', {
 			defaultMod: true,
-			display: 'PDF++: backlink highlights'
+			display: 'Annotator Plus: backlink highlights'
 		});
 
 		this.registerHoverLinkSource(PDFInternalLinkPostProcessor.HOVER_LINK_SOURCE_ID, {
 			defaultMod: true,
-			display: 'PDF++: internal links in PDF (except for citations)'
+			display: 'Annotator Plus: internal links in PDF (except for citations)'
 		});
 
 		this.registerHoverLinkSource(BibliographyManager.HOVER_LINK_SOURCE_ID, {
 			defaultMod: false,
-			display: 'PDF++: citation links in PDF'
+			display: 'Annotator Plus: citation links in PDF'
 		});
 
 		this.registerHoverLinkSource(PDFExternalLinkPostProcessor.HOVER_LINK_SOURCE_ID, {
 			defaultMod: true,
-			display: 'PDF++: external links in PDF'
+			display: 'Annotator Plus: external links in PDF'
 		});
 
 		this.registerHoverLinkSource(PDFOutlineItemPostProcessor.HOVER_LINK_SOURCE_ID, {
 			defaultMod: true,
-			display: 'PDF++: outlines (bookmarks)'
+			display: 'Annotator Plus: outlines (bookmarks)'
 		});
 
 		this.registerHoverLinkSource(PDFThumbnailItemPostProcessor.HOVER_LINK_SOURCE_ID, {
 			defaultMod: true,
-			display: 'PDF++: thumbnails'
+			display: 'Annotator Plus: thumbnails'
 		});
 	}
 
@@ -900,7 +933,7 @@ export default class PDFPlus extends Plugin {
 
 	requireModKeyForLinkHover(id = 'pdf-plus') {
 		// @ts-ignore
-		return this.app.internalPlugins.plugins['page-preview'].instance.overrides[id]
+		return this.app.internalPlugins.plugins['page-preview']?.instance?.overrides?.[id]
 			?? this.app.workspace.hoverLinkSources[id]?.defaultMod
 			?? false;
 	}

@@ -15,6 +15,15 @@ import { PDFPlusComponent } from 'lib/component';
 export const onContextMenu = async (plugin: PDFPlus, child: PDFViewerChild, evt: MouseEvent): Promise<void> => {
     if (!child.palette) return;
 
+    if (plugin.isTouchInteraction(evt)) {
+        // The menu may have just been opened by "Show the menu after selecting text with a finger"
+        if (Date.now() - plugin.lastTouchMenuTime < 1000) {
+            evt.preventDefault();
+            return;
+        }
+        plugin.lastTouchMenuTime = Date.now();
+    }
+
     // take from app.js
     if (Platform.isDesktopApp) {
         // Use window.electron, not evt.win.electron to avoid issues in secondary windows
@@ -49,7 +58,7 @@ export async function showContextMenu(plugin: PDFPlus, child: PDFViewerChild, ev
     if (child.pdfViewer.isEmbed) evt.preventDefault();
 }
 
-export async function showContextMenuAtSelection(plugin: PDFPlus, child: PDFViewerChild, selection: Selection) {
+export async function showContextMenuAtSelection(plugin: PDFPlus, child: PDFViewerChild, selection: Selection, touch = false) {
     if (!selection || !selection.focusNode || selection.isCollapsed) {
         return;
     }
@@ -64,7 +73,7 @@ export async function showContextMenuAtSelection(plugin: PDFPlus, child: PDFView
     range.setEnd(focusNode, focusOffset);
     const { x, y } = range.getBoundingClientRect();
 
-    const menu = new PDFPlusContextMenu(plugin, child);
+    const menu = new PDFPlusContextMenu(plugin, child, touch);
     await menu.addItems();
     child.clearEphemeralUI();
     plugin.shownMenus.forEach((menu) => menu.hide());
@@ -437,13 +446,20 @@ export class PDFPlusMenu extends Menu {
 export class PDFPlusContextMenu extends PDFPlusMenu {
     child: PDFViewerChild;
     currentSection: string | null;
+    /** Whether this menu was opened by a touch interaction (e.g. long press), in which case it is made finger-friendly. */
+    touch: boolean;
 
-    constructor(plugin: PDFPlus, child: PDFViewerChild) {
+    constructor(plugin: PDFPlus, child: PDFViewerChild, touch = false) {
         super(plugin);
         this.child = child;
         this.currentSection = null;
+        this.touch = touch;
         this.setUseNativeMenu(false);
-        this.addSections(Object.keys(DEFAULT_SETTINGS.contextMenuConfig));
+        this.addSections(DEFAULT_SETTINGS.contextMenuConfig.map(({ id }) => id));
+
+        if (touch && plugin.settings.touchLargeMenuItems) {
+            this.dom.addClass('annotator-plus-touch-menu');
+        }
 
         if (plugin.settings.enableVimInContextMenu) {
             registerVimKeybindsToMenu(this);
@@ -451,7 +467,7 @@ export class PDFPlusContextMenu extends PDFPlusMenu {
     }
 
     static async fromMouseEvent(plugin: PDFPlus, child: PDFViewerChild, evt: MouseEvent) {
-        const menu = new PDFPlusContextMenu(plugin, child);
+        const menu = new PDFPlusContextMenu(plugin, child, plugin.isTouchInteraction(evt));
         await menu.addItems(evt);
         return menu;
     }
@@ -468,6 +484,42 @@ export class PDFPlusContextMenu extends PDFPlusMenu {
             });
         }
         return super.addItem(cb);
+    }
+
+    /** Adds a flat (no submenus) list of the copy formats under the "Annotate" section. */
+    addAnnotateItems(onClick: (copyFormat: string) => any) {
+        const { child, lib } = this;
+        const file = child.file;
+        if (!file) return;
+
+        const target = lib.annotate.describeTargets(file);
+        let title: string;
+        if (target) {
+            title = `Annotate in "${target}"`;
+        } else if (this.settings.annotationFallback === 'clipboard') {
+            title = 'Annotate (no linked note: will copy)';
+        } else {
+            title = 'Annotate (no linked note)';
+        }
+
+        this.addItem((item) => {
+            item.setSection('annotate')
+                .setTitle(title)
+                .setIcon('lucide-notebook-pen')
+                .setDisabled(true);
+        });
+
+        const hidden = this.settings.annotateMenuHiddenFormats;
+        const activeIndex = child.palette?.actionIndex ?? -1;
+        this.settings.copyCommands.forEach(({ name, template }, index) => {
+            if (hidden.includes(name)) return;
+            this.addItem((item) => {
+                item.setSection('annotate')
+                    .setTitle(name)
+                    .setIcon(index === activeIndex ? 'lucide-check' : 'lucide-text-quote')
+                    .onClick(() => onClick(template));
+            });
+        });
     }
 
     // TODO: divide into smaller methods
@@ -504,6 +556,16 @@ export class PDFPlusContextMenu extends PDFPlusMenu {
 
         //// Add items ////
 
+        const flat = this.touch && this.settings.touchFlatMenu;
+
+        // Annotator Plus: add the selection to the notes that link to this PDF //
+        if (selectedText && selection && child.palette && isVisible('annotate')) {
+            const palette = child.palette;
+            this.addAnnotateItems((copyFormat) => {
+                lib.annotate.annotateSelection(false, { copyFormat, displayTextFormat: palette.getDisplayTextFormat() }, palette.getColorName());
+            });
+        }
+
         if (selectedText) {
             // copy with custom formats //
 
@@ -512,9 +574,10 @@ export class PDFPlusContextMenu extends PDFPlusMenu {
                     PDFPlusProductMenuComponent
                         .create(this, child.palette)
                         .setSection('selection', 'Copy link to selection', 'lucide-copy')
+                        .setFlat(flat)
                         .addItems(plugin.settings.selectionProductMenuConfig)
                         .onItemClick(({ copyFormat, displayTextFormat, colorName }) => {
-                            lib.copyLink.copyLinkToSelection(false, { copyFormat, displayTextFormat }, colorName ?? undefined);
+                            lib.copyLink.copyLinkToSelection(false, { copyFormat, displayTextFormat }, colorName ?? undefined, false, false);
                         });
                 }
 
@@ -537,6 +600,7 @@ export class PDFPlusContextMenu extends PDFPlusMenu {
                     PDFPlusProductMenuComponent
                         .create(this, child.palette)
                         .setSection('write-file', `Add ${plugin.settings.selectionBacklinkVisualizeStyle} to file`, 'lucide-edit')
+                        .setFlat(flat)
                         .setShowNoColorButton(false)
                         .addItems(plugin.settings.writeFileProductMenuConfig)
                         .onItemClick(({ copyFormat, displayTextFormat, colorName }) => {
@@ -556,15 +620,24 @@ export class PDFPlusContextMenu extends PDFPlusMenu {
                 const { id } = lib.getAnnotationInfoFromAnnotationElement(annot);
                 annotatedText = await child.getAnnotatedText(pageView, id);
 
+                // Annotator Plus: add the annotation to the notes that link to this PDF //
+                if (child.palette && isVisible('annotate') && !selectedText) {
+                    const palette = child.palette;
+                    this.addAnnotateItems((copyFormat) => {
+                        lib.copyLink.copyLinkToAnnotation(child, false, { copyFormat, displayTextFormat: palette.getDisplayTextFormat() }, pageNumber, id, false, true, { explicitFormat: true });
+                    });
+                }
+
                 // copy link to annotation with custom formats //
 
                 if (child.palette && isVisible('annotation')) {
                     PDFPlusProductMenuComponent
                         .create(this, child.palette)
                         .setSection('annotation', 'Copy link to annotation', 'lucide-copy')
+                        .setFlat(flat)
                         .addItems(plugin.settings.annotationProductMenuConfig)
                         .onItemClick(({ copyFormat, displayTextFormat }) => {
-                            lib.copyLink.copyLinkToAnnotation(child, false, { copyFormat, displayTextFormat }, pageNumber, id, false, true);
+                            lib.copyLink.copyLinkToAnnotation(child, false, { copyFormat, displayTextFormat }, pageNumber, id, false, true, false);
                         });
                 }
 
@@ -768,7 +841,7 @@ export class PDFPlusContextMenu extends PDFPlusMenu {
             });
         }
 
-        if (this.items.length && isVisible('settings')) {
+        if (this.items.length && isVisible('settings') && !(this.touch && this.settings.touchHideCustomizeItem)) {
             this.addItem((item) => {
                 item.setSection('settings')
                     .setIcon('lucide-settings')
@@ -805,6 +878,8 @@ export class PDFPlusProductMenuComponent extends PDFPlusComponent {
     sectionIcon?: string;
 
     showNoColorButton: boolean;
+    /** If true, only the first level of the nested menu is shown (nested menus can't be opened by touch). */
+    flat = false;
 
     protected constructor(rootMenu: Menu, palette: ColorPalette) {
         super(palette.plugin);
@@ -824,6 +899,11 @@ export class PDFPlusProductMenuComponent extends PDFPlusComponent {
 
     setShowNoColorButton(showNoColorButton: boolean) {
         this.showNoColorButton = showNoColorButton;
+        return this;
+    }
+
+    setFlat(flat: boolean) {
+        this.flat = flat;
         return this;
     }
 
@@ -853,7 +933,7 @@ export class PDFPlusProductMenuComponent extends PDFPlusComponent {
 
         // Nested menus don't work on the mobile app, so we limit the depth to 1.
         // See also: https://github.com/RyotaUshio/obsidian-pdf-plus/issues/162
-        if (!Platform.isDesktopApp) {
+        if (!Platform.isDesktopApp || this.flat) {
             order = order.slice(0, 1);
         }
 
@@ -959,7 +1039,7 @@ export class PDFPlusProductMenuComponent extends PDFPlusComponent {
 
         // On the mobile app, nested menus don't work.
         // See https://github.com/RyotaUshio/obsidian-pdf-plus/issues/168
-        if (Platform.isDesktopApp) {
+        if (Platform.isDesktopApp && !this.flat) {
             const { items } = getSelectedItemsRecursive(this.rootMenu);
             for (const item of items) {
                 if (this.itemToColorName.has(item)) {
